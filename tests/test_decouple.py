@@ -1,0 +1,173 @@
+import numpy as np
+import numpy.testing as npt
+import pandas as pd
+import pytest
+from anndata import AnnData
+
+from decoupler.decouple import (
+    decouple,
+    get_wrappers,
+    parse_methods,
+    run_consensus,
+    run_methods,
+)
+
+
+def test_get_wrappers():
+    get_wrappers(["mlm", "ulm"])
+
+
+def test_run_methods():
+    m = np.array(
+        [
+            [7.0, 1.0, 1.0, 1.0, 0.1],
+            [4.0, 2.0, 1.0, 2.0, 0.1],
+            [1.0, 2.0, 5.0, 1.0, 0.1],
+            [1.0, 1.0, 6.0, 2.0, 0.1],
+        ]
+    )
+    r = np.array(["S1", "S2", "S3", "S4"])
+    c = np.array(["G1", "G2", "G3", "G4", "G5"])
+    df = pd.DataFrame(m, index=r, columns=c)
+    net = pd.DataFrame(
+        [["T1", "G1", 1], ["T1", "G2", 2], ["T2", "G3", -3], ["T2", "G4", 4]],
+        columns=["source", "target", "weight"],
+    )
+    run_methods(
+        AnnData(df),
+        net,
+        "source",
+        "target",
+        "weight",
+        ["gsva"],
+        {},
+        0,
+        False,
+        False,
+        False,
+    )
+    run_methods(
+        df, net, "source", "target", "weight", ["gsva"], {}, 0, False, False, False
+    )
+    wo_args = run_methods(
+        df,
+        net,
+        "source",
+        "target",
+        "weight",
+        ["ulm", "aucell"],
+        {},
+        0,
+        False,
+        False,
+        False,
+    )
+    wt_args = run_methods(
+        df,
+        net,
+        "source",
+        "target",
+        "weight",
+        ["ulm", "aucell"],
+        {"aucell": {"n_up": 3}},
+        0,
+        False,
+        False,
+        False,
+    )
+    assert np.all(
+        wo_args["aucell_estimate"].values != wt_args["aucell_estimate"].values
+    )
+    # Run dense
+    df.loc["S1", ["G3", "G4"]] = 0
+    dens = run_methods(
+        df,
+        net,
+        "source",
+        "target",
+        "weight",
+        ["ulm", "aucell"],
+        {},
+        0,
+        False,
+        False,
+        True,
+    )
+    assert (
+        wt_args["ulm_estimate"].loc["S1", "T2"] != dens["ulm_estimate"].loc["S1", "T2"]
+    )
+    npt.assert_allclose(
+        wt_args["ulm_estimate"].values[1:, :],
+        dens["ulm_estimate"].values[1:, :],
+        rtol=1e-6,
+    )
+    # Check that estimate_loc works
+    res = run_methods(
+        df,
+        net,
+        "source",
+        "target",
+        "weight",
+        ["ulm", "wsum"],
+        {"wsum": {"estimate_loc": 3}},
+        0,
+        False,
+        False,
+        True,
+    )
+    npt.assert_allclose(res["wsum_estimate"], res["wsum_pvals"])
+
+
+def test_parse_methods():
+    parse_methods(None, None)
+    parse_methods("all", None)
+    parse_methods(["mlm", "ulm"], None)
+
+
+def test_decouple():
+    m = np.array(
+        [
+            [7.0, 1.0, 1.0, 1.0],
+            [4.0, 2.0, 1.0, 2.0],
+            [1.0, 2.0, 5.0, 1.0],
+            [1.0, 1.0, 6.0, 2.0],
+        ]
+    )
+    r = np.array(["S1", "S2", "S3", "S4"])
+    c = np.array(["G1", "G2", "G3", "G4"])
+    df = pd.DataFrame(m, index=r, columns=c)
+    adata = AnnData(df.astype(np.float32))
+    net = pd.DataFrame(
+        [["T1", "G1", 1], ["T1", "G2", 2], ["T2", "G3", -3], ["T2", "G4", 4]],
+        columns=["source", "target", "weight"],
+    )
+    decouple(adata, net, methods=["mlm", "ulm"], min_n=0, verbose=True, use_raw=False)
+    with pytest.raises(ValueError):
+        decouple(
+            adata,
+            net,
+            methods=["mlm", "ulm", "asd"],
+            min_n=0,
+            verbose=True,
+            use_raw=False,
+        )
+
+
+def test_run_consensus():
+    m = np.array(
+        [
+            [7.0, 1.0, 1.0, 1.0],
+            [4.0, 2.0, 1.0, 2.0],
+            [1.0, 2.0, 5.0, 1.0],
+            [1.0, 1.0, 6.0, 2.0],
+        ]
+    )
+    r = np.array(["S1", "S2", "S3", "S4"])
+    c = np.array(["G1", "G2", "G3", "G4"])
+    df = pd.DataFrame(m, index=r, columns=c)
+    adata = AnnData(df.astype(np.float32))
+    net = pd.DataFrame(
+        [["T1", "G1", 1], ["T1", "G2", 2], ["T2", "G3", -3], ["T2", "G4", 4]],
+        columns=["source", "target", "weight"],
+    )
+    run_consensus(adata, net, min_n=0, verbose=True, use_raw=False)
